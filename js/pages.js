@@ -524,6 +524,7 @@ const Pages = (() => {
       try { if (await App.api.rpc('app_needs_setup')) mode = 'setup'; } catch (e) {
         console.warn(e);
         if (/app_needs_setup|schema cache|does not exist|404/i.test(e.message || '')) setupError = 'قاعدة البيانات لسه ما اتجهزتش — شغّل ملف supabase/schema.sql في Supabase (SQL Editor) وبعدين حدّث الصفحة.';
+        else setupError = 'تعذر الاتصال بقاعدة البيانات — تحقق من الإنترنت، ولو عندك مانع إعلانات (Ad blocker) أوقفه لهذا الموقع، ثم اضغط "إعادة المحاولة".';
       }
     }
     const titles = { in: 'تسجيل الدخول', setup: 'إعداد حساب مدير النظام', reset: 'استعادة كلمة المرور' };
@@ -558,7 +559,7 @@ const Pages = (() => {
             <div class="auth-brand-sm"><div class="logo">TC</div><b>Time Code</b></div>
             <h1 class="auth-title">${titles[mode]}</h1>
             <p class="auth-sub">${subs[mode]}</p>
-            ${setupError ? `<div class="callout bad">${esc(setupError)}</div>` : ''}
+            ${setupError ? `<div class="callout bad">${esc(setupError)}<div style="margin-top:10px"><button type="button" class="btn sm" onclick="location.reload()">↻ إعادة المحاولة</button></div></div>` : ''}
             <form id="authForm" class="auth-form" novalidate>
               ${mode === 'setup' ? '<label class="field"><span class="lbl">الاسم الكامل</span><input name="full_name" required maxlength="80" autocomplete="name"></label>' : ''}
               <label class="field"><span class="lbl">البريد الإلكتروني</span><input type="email" name="email" required autocomplete="${mode === 'setup' ? 'email' : 'username'}" dir="ltr" placeholder="name@timecode.com.sa"></label>
