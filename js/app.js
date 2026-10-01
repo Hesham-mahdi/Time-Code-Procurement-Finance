@@ -237,6 +237,9 @@ const App = {
             <button class="icon-btn theme-btn" data-action="toggleTheme" aria-label="تبديل الوضع الليلي" title="الوضع الليلي / النهاري">◐</button>
             <a href="#/notifications" class="bell" aria-label="الإشعارات">🔔${unread ? `<span class="bell-count">${unread}</span>` : ''}</a>
           </header>
+          ${this.api.missing && this.api.missing.size ? `<div class="db-banner">
+            <b>⚠ قاعدة البيانات محتاجة تحديث</b> — ${this.isFin() ? `شغّل ملف <a href="https://raw.githubusercontent.com/Hesham-mahdi/Time-Code-Procurement-Finance/main/supabase/schema.sql" target="_blank" rel="noopener">schema.sql الأحدث</a> في Supabase (SQL Editor ← New query ← Run) وبعدين حدّث الصفحة.` : 'بلّغ مدير النظام.'}
+            <span class="muted small">(ناقص: ${[...this.api.missing].join('، ')})</span></div>` : ''}
           <main class="content">${out.html}</main>
         </div>
       </div>`;

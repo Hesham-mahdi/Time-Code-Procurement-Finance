@@ -42,11 +42,14 @@ function SupabaseBackend(cfg) {
     },
     async signOut() { await sb.auth.signOut(); },
 
+    missing: new Set(),
     async select(table) {
       const out = [];
       const page = 1000;
       for (let from = 0; ; from += page) {
         const { data, error } = await sb.from(table).select('*').range(from, from + page - 1);
+        // جدول لسه ما اتعملش (schema.sql قديم) — نكمل بدونه ونبلّغ المدير
+        if (error && (error.code === 'PGRST205' || error.code === '42P01')) { this.missing.add(table); return out; }
         fail(error);
         out.push(...data);
         if (data.length < page) break;

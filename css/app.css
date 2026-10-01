@@ -810,6 +810,9 @@ details.adv > .grid3 { margin-top: 12px; }
   .t-open { flex-wrap: wrap; }
   .tasks .btn { width: 100%; }
 }
+.db-banner { margin: 16px 28px 0; padding: 12px 16px; border-radius: 12px; background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); font-size: 13.5px; }
+.db-banner a { font-weight: 700; text-decoration: underline; }
+@media (max-width: 960px) { .db-banner { margin: 12px 16px 0; } }
 /* البحث والموردين */
 .chip-list { display: flex; flex-wrap: wrap; gap: 10px; }
 .result-chip { display: flex; flex-direction: column; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); min-width: 180px; transition: border-color .15s, transform .15s; }

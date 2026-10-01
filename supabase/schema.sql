@@ -583,3 +583,9 @@ begin
   alter publication supabase_realtime add table public.notifications;
 exception when duplicate_object then null;
 end $$;
+
+-- تحديث ذاكرة الـ API فوراً علشان الجداول الجديدة تظهر
+notify pgrst, 'reload schema';
+
+-- ✓ لو وصلت هنا من غير أخطاء: الإصدار 2 جاهز
+select 'Time Code schema v2 ✓' as status, (select count(*) from information_schema.tables where table_schema = 'public' and table_name in ('tax_invoices','budget_revisions','audit_log')) as new_tables_found;
