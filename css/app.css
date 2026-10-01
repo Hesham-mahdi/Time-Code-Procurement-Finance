@@ -221,9 +221,18 @@ img { max-width: 100%; display: block; }
 }
 .logo.lg { width: 56px; height: 56px; font-size: 20px; border-radius: 16px; }
 .logo.xl { width: 64px; height: 64px; font-size: 23px; border-radius: 18px; }
+.brand { flex-direction: column; align-items: flex-start; gap: 8px; padding: 6px 10px 24px; }
+.brand-logo { height: 38px; width: auto; filter: drop-shadow(0 4px 10px rgba(0, 0, 0, .25)); }
+.av-logo { height: 70px; width: auto; filter: drop-shadow(0 8px 20px rgba(0, 0, 0, .35)); }
+.av-brand { flex-direction: column; align-items: flex-start; gap: 12px; }
+.av-brand > span { color: #a9bfda; font-size: 14px; letter-spacing: .3px; }
+.logo-navy { height: 40px; width: auto; }
+.pending-logo { height: 52px; margin: 0 auto 20px; }
+:root[data-theme="dark"] .logo-navy { filter: brightness(0) invert(1); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .logo-navy { filter: brightness(0) invert(1); } }
 .brand-name { font-weight: 700; color: #fff; font-family: 'Segoe UI', system-ui, sans-serif; letter-spacing: .3px; }
 .brand-sub { font-size: 12px; color: #9fb3cc; }
-.nav { position: relative; display: flex; flex-direction: column; gap: 3px; flex: 1; overflow-y: auto; }
+.nav { position: relative; display: flex; flex-direction: column; gap: 3px; flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, .18) transparent; }
 .nav a {
   display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px;
   color: #c3d0e0; font-weight: 500; transition: background .15s, color .15s;

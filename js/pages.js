@@ -540,7 +540,7 @@ const Pages = (() => {
           <div class="av-grid"></div>
           <div class="av-orb o1"></div><div class="av-orb o2"></div>
           <div class="av-content">
-            <div class="av-brand"><div class="logo xl">TC</div><div><b>Time Code</b><span>المشتريات × المالية</span></div></div>
+            <div class="av-brand"><img src="assets/logo-mark-white.png" class="av-logo" alt="Time Code"><span>المشتريات × المالية</span></div>
             <h2>كل فاتورة، كل دفعة، كل ريال —<br><em>في مكان واحد.</em></h2>
             <ul class="av-points">
               <li><span>🧾</span><div><b>طلبات سداد بضغطة</b><small>المشتريات ترفع الفاتورة أو عرض السعر بالصورة ونسبة السداد</small></div></li>
@@ -556,7 +556,7 @@ const Pages = (() => {
         </section>
         <section class="auth-panel">
           <div class="auth-card">
-            <div class="auth-brand-sm"><div class="logo">TC</div><b>Time Code</b></div>
+            <div class="auth-brand-sm"><img src="assets/logo-mark.png" class="logo-navy" alt="Time Code"></div>
             <h1 class="auth-title">${titles[mode]}</h1>
             <p class="auth-sub">${subs[mode]}</p>
             ${setupError ? `<div class="callout bad">${esc(setupError)}<div style="margin-top:10px"><button type="button" class="btn sm" onclick="location.reload()">↻ إعادة المحاولة</button></div></div>` : ''}
@@ -621,7 +621,7 @@ const Pages = (() => {
     const me = App.me || {};
     document.getElementById('app').innerHTML = `
       <div class="auth"><div class="auth-card center">
-        <div class="logo lg">TC</div>
+        <img src="assets/logo-mark.png" class="logo-navy pending-logo" alt="Time Code">
         <h2>${me.role === 'disabled' ? 'الحساب موقوف' : 'حسابك بانتظار التفعيل'}</h2>
         <p class="muted">${me.role === 'disabled' ? 'تواصل مع المالية لإعادة تفعيل الحساب.' : 'تم تسجيلك بنجاح. المالية لازم تحدد صلاحيتك (مشتريات / مالية / إدارة) قبل ما تقدر تستخدم النظام.'}</p>
         <p class="small">${esc(me.full_name || '')} — <span dir="ltr">${esc(me.email || (App.user && App.user.email) || '')}</span></p>

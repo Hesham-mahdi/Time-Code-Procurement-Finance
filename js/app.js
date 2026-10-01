@@ -189,8 +189,8 @@ const App = {
       <div class="layout">
         <aside class="sidebar" id="sidebar">
           <div class="brand">
-            <div class="logo">TC</div>
-            <div><div class="brand-name">Time Code</div><div class="brand-sub">المشتريات والمالية</div></div>
+            <img src="assets/logo-mark-white.png" class="brand-logo" alt="Time Code">
+            <div class="brand-sub">المشتريات × المالية</div>
           </div>
           <nav class="nav">
             ${this.nav().map(([k, label, ico]) => `
