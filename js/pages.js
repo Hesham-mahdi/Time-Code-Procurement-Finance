@@ -47,7 +47,7 @@ const Pages = (() => {
           <td class="num">${sar(i.total)}</td>
           <td class="num">${pct(num(d.requested_percent), 0)}</td>
           <td class="pay-cell"><div class="mini-bar"><div style="width:${Math.min(100, i.paidPct)}%"></div></div><span class="small muted">${pct(i.paidPct)}</span></td>
-          <td>${pill(i.st)}${i.needsTI ? '<div class="small warn-text">⧗ مطلوب الفاتورة الضريبية</div>' : ''}</td>
+          <td>${pill(i.st)}${i.needsTI ? `<div class="small warn-text">⧗ مطلوب فاتورة ضريبية${i.tiWaitDays ? ` · منذ ${i.tiWaitDays} يوم` : ''}</div>` : ''}${i.overdueDays ? `<div class="small bad-text">⏰ متأخر ${i.overdueDays} يوم</div>` : ''}${i.needsReview ? `<div class="small muted">منذ ${U.daysBetween(d.created_at, U.today())} يوم</div>` : ''}</td>
           <td><button class="btn sm ghost" data-action="openDoc" data-id="${d.id}">عرض</button></td>
         </tr>`;
       }).join('')}</tbody></table></div>`;
@@ -118,17 +118,29 @@ const Pages = (() => {
 
   function costTable(c) {
     const t = c.totals;
+    const fv = (r) => round2(r.budget - r.forecast);
     const varCell = (v) => `<td class="num ${v < 0 ? 'bad-text' : ''}">${sar(v)}</td>`;
+    const revCell = (v) => `<td class="num ${v < 0 ? 'bad-text' : v > 0 ? 'good-text' : 'muted'}">${v ? (v > 0 ? '+' : '') + money(v) : '—'}</td>`;
     return `<div class="table-wrap"><table class="tbl cost-tbl">
-      <thead><tr><th>البند</th><th class="num">التكلفة التقديرية</th><th class="num">الملتزم به</th><th class="num">المسدد فعلاً</th>
-        <th class="num">تحت المراجعة</th><th class="num">الانحراف (تقديري − ملتزم)</th><th class="num">الاستهلاك</th><th>الحالة</th></tr></thead>
+      <thead><tr><th>البند</th><th class="num">التقديري الأصلي</th><th class="num">التعديلات</th><th class="num">الميزانية المعدلة</th>
+        <th class="num">الملتزم به</th><th class="num">المفوتر</th><th class="num">المسدد فعلاً</th><th class="num">تحت المراجعة</th>
+        <th class="num">المتوقع عند الإنجاز</th><th class="num">الانحراف المتوقع</th><th class="num">الاستهلاك</th><th>الحالة</th></tr></thead>
       <tbody>${c.rows.map((r) => `<tr>
-        <td><b>${esc(r.name)}</b></td><td class="num">${sar(r.budget)}</td><td class="num">${sar(r.committed)}</td><td class="num">${sar(r.paid)}</td>
-        <td class="num muted">${sar(r.pending)}</td>${varCell(r.variance)}<td class="num">${pct(r.usage)}</td><td>${statePill(r.state)}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><th>الإجمالي</th><th class="num">${sar(t.budget)}</th><th class="num">${sar(t.committed)}</th><th class="num">${sar(t.paid)}</th>
-        <th class="num">${sar(t.pending)}</th><th class="num ${t.variance < 0 ? 'bad-text' : ''}">${sar(t.variance)}</th><th class="num">${pct(t.usage)}</th><th>${statePill(t.state)}</th></tr></tfoot>
+        <td><b>${esc(r.name)}</b></td><td class="num">${sar(r.original)}</td>${revCell(r.revisions)}<td class="num"><b>${sar(r.budget)}</b></td>
+        <td class="num">${sar(r.committed)}</td><td class="num">${sar(r.invoiced)}</td><td class="num">${sar(r.paid)}</td>
+        <td class="num muted">${sar(r.pending)}</td><td class="num">${sar(r.forecast)}</td>${varCell(fv(r))}<td class="num">${pct(r.usage)}</td><td>${statePill(r.state)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><th>الإجمالي</th><th class="num">${sar(t.original)}</th>${revCell(t.revisions).replace('<td', '<th').replace('</td>', '</th>')}<th class="num">${sar(t.budget)}</th>
+        <th class="num">${sar(t.committed)}</th><th class="num">${sar(t.invoiced)}</th><th class="num">${sar(t.paid)}</th><th class="num">${sar(t.pending)}</th>
+        <th class="num">${sar(t.forecast)}</th><th class="num ${t.forecastVariance < 0 ? 'bad-text' : ''}">${sar(t.forecastVariance)}</th><th class="num">${pct(t.usage)}</th><th>${statePill(t.state)}</th></tr></tfoot>
     </table></div>
-    <p class="note">كل المبالغ قبل ضريبة القيمة المضافة. الضريبة على المستندات المعتمدة: ${sar(t.vat)} · الإجمالي شامل الضريبة: ${sar(t.committedGross)} · المتبقي للسداد للموردين: ${sar(t.remainingGross)}</p>`;
+    <div class="cost-notes">
+      <div><span>كل المبالغ</span><b>قبل ضريبة القيمة المضافة</b></div>
+      <div><span>ضريبة مدخلات قابلة للاسترداد</span><b>${sar(round2(t.vat - t.vatBlocked))}</b></div>
+      <div><span>ضريبة معلّقة بانتظار فواتير ضريبية</span><b class="${t.vatBlocked > 0 ? 'warn-text' : ''}">${sar(t.vatBlocked)}</b></div>
+      <div><span>محتجز ضمان لم يُفرج عنه</span><b>${sar(t.retention)}</b></div>
+      <div><span>المتبقي للموردين (شامل الضريبة)</span><b>${sar(t.remainingGross)}</b></div>
+    </div>
+    <p class="note">الملتزم به = المستندات المعتمدة (الفاتورة الضريبية النهائية بتحل محل عرض السعر). المتوقع عند الإنجاز = الملتزم به + اللي تحت المراجعة. الانحراف المتوقع = الميزانية المعدلة − المتوقع.</p>`;
   }
 
   const filterSelect = (key, label, options, q) => `
@@ -142,51 +154,96 @@ const Pages = (() => {
   const thisMonth = () => U.today().slice(0, 7);
 
   // ================================================================ الصفحات
+  // لوحة التحكم = صندوق مهام: كل دور يشوف المطلوب منه الأول، مرتب بالأقدم والأكثر تأخيراً
   function dashboard() {
-    const docs = App.db.documents;
-    const infos = docs.map((d) => ({ d, i: App.info(d) }));
+    const infos = App.db.documents.map((d) => ({ d, i: App.info(d) }));
+    const by = (f) => infos.filter(({ d, i }) => f(d, i));
     const monthPaid = U.sum(App.db.payments.filter((p) => String(p.pay_date).startsWith(thisMonth())), (p) => p.amount);
     const costs = App.db.projects.map((p) => ({ p, c: Logic.projectCost(p.id, App.db) }));
     const over = costs.filter((x) => x.c.totals.state && x.c.totals.state.cls === 'bad');
+    const in7 = (() => { const t = new Date(); t.setDate(t.getDate() + 7); return t.toISOString().slice(0, 10); })();
     const role = App.role;
+    const age = (d) => U.daysBetween(d.created_at, U.today());
+    const sortOld = (list) => list.slice().sort((a, b) => String(a.d.created_at).localeCompare(String(b.d.created_at)));
+    const sortDue = (list) => list.slice().sort((a, b) => (b.i.overdueDays - a.i.overdueDays) || String(a.d.due_date || '9999').localeCompare(String(b.d.due_date || '9999')));
+    // زر الإجراء المباشر لكل مهمة (اعتماد / سداد / فاتورة / تعديل) — من غير ما تفتح المستند
+    const quick = (d, i) => {
+      if (App.isFin() && i.needsReview) return `<button class="btn sm primary" data-action="review" data-id="${d.id}" data-decision="approved">✓ اعتماد</button>`;
+      if (App.isFin() && i.needsPayment) return `<button class="btn sm primary" data-action="pay" data-id="${d.id}">＋ سداد</button>`;
+      if (App.isFin() && i.canRelease) return `<button class="btn sm" data-action="releaseRetention" data-id="${d.id}">🔓 إفراج</button>`;
+      if (App.canCreate() && i.needsTI) return `<button class="btn sm primary" data-action="uploadTI" data-id="${d.id}">⬆ رفع الفاتورة</button>`;
+      if (App.isProc() && i.needsFix) return `<button class="btn sm" data-action="editDoc" data-id="${d.id}">✎ تعديل وإعادة إرسال</button>`;
+      return `<button class="btn sm ghost" data-action="openDoc" data-id="${d.id}">عرض</button>`;
+    };
+    const chip = (d, i) => {
+      if (i.overdueDays) return `<span class="pill bad">⏰ متأخر ${i.overdueDays} يوم</span>`;
+      if (i.needsTI && i.tiWaitDays) return `<span class="pill ${i.tiWaitDays > 15 ? 'bad' : 'warn'}">⧗ منذ ${i.tiWaitDays} يوم</span>`;
+      if (i.needsReview) { const a = age(d); return `<span class="pill ${a > 3 ? 'warn' : 'neutral'}">منذ ${a} يوم</span>`; }
+      if (d.due_date && i.needsPayment) return `<span class="pill neutral">يستحق ${U.date(d.due_date)}</span>`;
+      return Pages.pill(i.st);
+    };
+    const task = (title, list, emptyMsg, tone = '') => `
+      <section class="card task-card ${tone}"><div class="card-head"><h2>${title} <span class="count-chip">${list.length}</span></h2></div>
+        ${list.length ? `<ul class="tasks">${list.slice(0, 12).map(({ d, i }) => `
+          <li>
+            <button type="button" class="t-open" data-action="openDoc" data-id="${d.id}" aria-label="عرض ${esc(App.docTitle(d))}">
+              ${typeBadge(d)}
+              <span class="t-main"><b>${esc(d.supplier_name)}</b><span>${esc((App.project(d.project_id) || {}).name || '')}${d.doc_number ? ' · ' + esc(d.doc_number) : ''}</span></span>
+              <span class="t-amt">${sar(i.needsTI ? i.uninvoiced || i.total : i.needsPayment ? i.dueNow : i.total)}</span>
+              ${chip(d, i)}
+            </button>
+            ${quick(d, i)}
+          </li>`).join('')}</ul>${list.length > 12 ? `<a class="link small" href="#/requests">+ ${list.length - 12} أخرى</a>` : ''}` : `<div class="all-clear">✓ ${emptyMsg}</div>`}</section>`;
     let html = '';
 
     if (role === 'procurement') {
-      const mine = infos.filter((x) => x.i.needsTI || x.i.needsFix);
+      const tiList = by((d, i) => i.needsTI).sort((a, b) => b.i.tiWaitDays - a.i.tiWaitDays);
+      const fix = by((d) => d.review_status === 'clarification' || d.review_status === 'rejected');
+      const uninv = U.sum(tiList, (x) => x.i.uninvoiced);
       html = `
         <div class="hero-actions">
           <button class="btn primary lg" data-action="newDoc">＋ رفع فاتورة / عرض سعر</button>
           <button class="btn lg" data-action="newProject">＋ مشروع جديد</button>
         </div>
         <div class="kpis">
-          ${kpi('بانتظار مراجعة المالية', infos.filter((x) => x.d.review_status === 'new').length)}
-          ${kpi('معتمد بانتظار السداد', infos.filter((x) => x.i.needsPayment).length, sar(U.sum(infos.filter((x) => x.i.needsPayment), (x) => x.i.dueNow)))}
-          ${kpi('مطلوب منك إجراء', mine.length, 'فواتير ضريبية / استيضاحات', mine.length ? 'attn' : '')}
-          ${kpi('مسدد هذا الشهر', sar(monthPaid))}
+          ${kpi('بانتظار مراجعة المالية', by((d) => d.review_status === 'new').length)}
+          ${kpi('معتمد بانتظار السداد', by((d, i) => i.needsPayment).length, sar(U.sum(by((d, i) => i.needsPayment), (x) => x.i.dueNow)))}
+          ${kpi('مطلوب منك', tiList.length + fix.length, 'فواتير ضريبية + استيضاحات', tiList.length + fix.length ? 'attn' : 'good')}
+          ${kpi('مسدد بدون فاتورة ضريبية', sar(uninv), tiList.length ? `${tiList.length} مستند — أقدمها منذ ${tiList[0].i.tiWaitDays} يوم` : '✓ كل المدفوعات مفوترة', uninv ? 'warn' : 'good')}
         </div>
-        <section class="card"><div class="card-head"><h2>مطلوب منك</h2></div>
-          ${mine.length ? docsTable(mine.map((x) => x.d)) : empty('مفيش حاجة مطلوبة منك حالياً ✓')}</section>
+        ${fix.length ? task('مطلوب تعديل / استيضاح', fix, '', 'warn') : ''}
+        ${task('مطلوب رفع الفاتورة الضريبية', tiList, 'كل المدفوعات عليها فواتير ضريبية')}
         <section class="card"><div class="card-head"><h2>آخر الطلبات</h2><a href="#/requests" class="link">عرض الكل</a></div>
-          ${docsTable(docs.slice(0, 8))}</section>`;
+          ${docsTable(App.db.documents.slice(0, 8))}</section>`;
     } else {
-      const action = infos.filter((x) => x.i.needsReview || x.i.needsPayment);
-      const dueTotal = U.sum(infos.filter((x) => x.i.needsPayment), (x) => x.i.dueNow);
+      const toReview = sortOld(by((d, i) => i.needsReview));
+      const toPay = sortDue(by((d, i) => i.needsPayment));
+      const overdue = toPay.filter((x) => x.i.overdueDays);
+      const soon = toPay.filter((x) => x.d.due_date && x.d.due_date >= U.today() && x.d.due_date <= in7);
+      const releases = by((d, i) => i.canRelease);
+      const vatBlocked = U.sum(infos, (x) => x.i.vatBlocked);
       const pendingUsers = App.db.profiles.filter((p) => p.role === 'pending');
+      const fin = role === 'finance';
       html = `
-        ${role === 'finance' && pendingUsers.length ? `<div class="callout info">فيه ${pendingUsers.length} مستخدم جديد بانتظار التفعيل — <a href="#/settings" class="link">حدد صلاحياتهم من الإعدادات</a></div>` : ''}
-        <div class="kpis">
-          ${kpi('طلبات بانتظار المراجعة', infos.filter((x) => x.i.needsReview).length, '', infos.some((x) => x.i.needsReview) ? 'attn' : '')}
-          ${kpi('مستحق السداد', sar(dueTotal), `${infos.filter((x) => x.i.needsPayment).length} طلب معتمد`)}
-          ${kpi('مسدد هذا الشهر', sar(monthPaid))}
-          ${kpi('مشاريع تجاوزت الميزانية', over.length, over.map((x) => esc(x.p.name)).join('، ') || 'لا يوجد', over.length ? 'bad' : '')}
+        ${fin && pendingUsers.length ? `<div class="callout info">فيه ${pendingUsers.length} مستخدم بانتظار التفعيل — <a href="#/settings" class="link">حدد صلاحياتهم</a></div>` : ''}
+        <div class="kpis five">
+          ${kpi('بانتظار المراجعة', toReview.length, toReview.length ? `أقدمها منذ ${age(toReview[0].d)} يوم` : '✓ لا يوجد', toReview.length ? 'attn' : 'good')}
+          ${kpi('مستحق السداد الآن', sar(U.sum(toPay, (x) => x.i.dueNow)), `${toPay.length} طلب معتمد`)}
+          ${kpi('متأخرات', sar(U.sum(overdue, (x) => x.i.dueNow)), overdue.length ? `${overdue.length} طلب — أقدمها ${overdue[0].i.overdueDays} يوم` : '✓ لا يوجد', overdue.length ? 'bad' : 'good')}
+          ${kpi('مستحق خلال 7 أيام', sar(U.sum(soon, (x) => x.i.dueNow)), `${soon.length} طلب · مسدد هذا الشهر ${money(monthPaid)}`)}
+          ${kpi('ضريبة معلّقة', sar(vatBlocked), vatBlocked ? 'مدفوعات على عروض أسعار بدون فواتير ضريبية' : '✓ كل المدفوعات مفوترة', vatBlocked ? 'warn' : 'good')}
         </div>
-        <section class="card"><div class="card-head"><h2>${role === 'finance' ? 'يحتاج إجراء منك' : 'بانتظار إجراء المالية'}</h2><a href="#/requests" class="link">كل الطلبات</a></div>
-          ${action.length ? docsTable(action.map((x) => x.d)) : empty('كل الطلبات متعامل معاها ✓')}</section>
+        ${over.length ? `<div class="callout bad">▲ مشاريع تجاوزت الميزانية: ${over.map((x) => `<a class="link" href="#/project/${x.p.id}?tab=cost">${esc(x.p.name)}</a> (${pct(x.c.totals.usage, 0)})`).join('، ')}</div>` : ''}
+        <div class="task-grid">
+          ${task(fin ? 'للمراجعة والاعتماد' : 'بانتظار مراجعة المالية', toReview, 'مفيش طلبات بانتظار المراجعة')}
+          ${task(fin ? 'للسداد — الأكثر تأخيراً أولاً' : 'بانتظار السداد', toPay, 'كل الطلبات المعتمدة اتسددت', overdue.length ? 'bad' : '')}
+        </div>
+        ${releases.length ? task('محتجزات جاهزة للإفراج', releases, '') : ''}
         <section class="card"><div class="card-head"><h2>مراكز التكلفة — المشاريع الجارية</h2><a href="#/reports" class="link">التقرير الكامل</a></div>
           ${costs.filter((x) => x.p.status === 'active').length ? `<div class="proj-mini">${costs.filter((x) => x.p.status === 'active').map(({ p, c }) => `
             <a class="proj-mini-row" href="#/project/${p.id}?tab=cost">
               <div class="pm-name"><b>${esc(p.name)}</b><span class="muted small">${esc(p.code || '')}</span></div>
-              <div class="pm-nums"><span>تقديري ${sar(c.totals.budget)}</span><span>ملتزم ${sar(c.totals.committed)}</span></div>
+              <div class="pm-nums"><span>ميزانية ${sar(c.totals.budget)}</span><span>ملتزم ${sar(c.totals.committed)} · متوقع ${sar(c.totals.forecast)}</span></div>
               ${usageBar(c.totals)}
             </a>`).join('')}</div>` : empty('لا توجد مشاريع جارية')}
         </section>`;
@@ -248,14 +305,25 @@ const Pages = (() => {
       body = paymentsTable(pays, { showProject: false });
     } else if (tab === 'budget') {
       const items = App.db.budget_items.filter((b) => b.project_id === p.id);
+      const revs = App.db.budget_revisions.filter((b) => b.project_id === p.id).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
       const files = App.db.attachments.filter((a) => a.project_id === p.id && a.kind === 'budget');
-      body = `<div class="toolbar"><p class="muted">التكلفة التقديرية لكل بند قبل الضريبة — من العرض المالي.</p><span class="spacer"></span>
-          ${App.isFin() ? `<button class="btn primary" data-action="editBudget" data-project="${p.id}">✎ ${items.length ? 'تعديل' : 'إدخال'} العرض المالي</button>` : ''}</div>
-        ${items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>البند</th><th class="num">التكلفة التقديرية</th><th class="num">النسبة</th><th>ملاحظات</th></tr></thead>
-          <tbody>${items.slice().sort((a, b) => num((App.db.cost_categories.find((x) => x.id === a.category_id) || {}).sort) - num((App.db.cost_categories.find((x) => x.id === b.category_id) || {}).sort)).map((b) => `<tr><td><b>${esc(App.category(b.category_id))}</b></td><td class="num">${sar(b.amount)}</td>
-            <td class="num">${pct(t.budget ? (num(b.amount) / t.budget) * 100 : 0)}</td><td>${esc(b.description || '')}</td></tr>`).join('')}</tbody>
-          <tfoot><tr><th>الإجمالي</th><th class="num">${sar(t.budget)}</th><th class="num">100%</th><th></th></tr></tfoot></table></div>`
-          : empty(App.isFin() ? 'لم يتم إدخال العرض المالي التقديري بعد' : 'المالية لم تُدخل العرض المالي التقديري بعد')}
+      const locked = Forms.budgetLocked(p.id) && items.length;
+      const catSort = (id) => num((App.db.cost_categories.find((x) => x.id === id) || {}).sort);
+      body = `<div class="toolbar"><p class="muted">التكلفة التقديرية لكل بند قبل الضريبة — من العرض المالي.${locked ? ' <span class="pill neutral">🔒 الأصلي مقفول — التغييرات بتتسجل كتعديلات</span>' : ''}</p><span class="spacer"></span>
+          ${App.isFin() ? (locked ? `<button class="btn primary" data-action="reviseBudget" data-project="${p.id}">± تعديل ميزانية</button>` : `<button class="btn primary" data-action="editBudget" data-project="${p.id}">✎ ${items.length ? 'تعديل' : 'إدخال'} العرض المالي</button>`) : ''}</div>
+        ${items.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>البند</th><th class="num">التقديري الأصلي</th><th class="num">التعديلات</th><th class="num">الميزانية المعدلة</th><th class="num">النسبة</th><th>ملاحظات</th></tr></thead>
+          <tbody>${c.rows.filter((r) => r.original || r.revisions).map((r) => {
+            const b = items.find((x) => (x.category_id || '_none') === r.id) || {};
+            return `<tr><td><b>${esc(r.name)}</b></td><td class="num">${sar(r.original)}</td>
+              <td class="num ${r.revisions < 0 ? 'bad-text' : r.revisions > 0 ? 'good-text' : 'muted'}">${r.revisions ? (r.revisions > 0 ? '+' : '') + money(r.revisions) : '—'}</td>
+              <td class="num"><b>${sar(r.budget)}</b></td><td class="num">${pct(t.budget ? (r.budget / t.budget) * 100 : 0)}</td><td>${esc(b.description || '')}</td></tr>`;
+          }).join('')}</tbody>
+          <tfoot><tr><th>الإجمالي</th><th class="num">${sar(t.original)}</th><th class="num">${t.revisions ? (t.revisions > 0 ? '+' : '') + money(t.revisions) : '—'}</th><th class="num">${sar(t.budget)}</th><th class="num">100%</th><th></th></tr></tfoot></table></div>`
+          : empty(App.isFin() ? 'لم يتم إدخال العرض المالي التقديري بعد' : 'المالية لم تُدخل العرض المالي التقديري بعد', App.isFin() ? `<button class="btn primary" data-action="editBudget" data-project="${p.id}">＋ إدخال العرض المالي</button>` : '')}
+        ${revs.length ? `<h4 class="sec-title">سجل تعديلات الميزانية</h4>
+          <div class="table-wrap"><table class="tbl"><thead><tr><th>التاريخ</th><th>البند</th><th class="num">المبلغ</th><th>السبب</th><th>بواسطة</th></tr></thead>
+          <tbody>${revs.map((r) => `<tr><td class="nowrap">${U.dt(r.created_at)}</td><td>${esc(App.category(r.category_id))}</td>
+            <td class="num ${num(r.amount) < 0 ? 'bad-text' : 'good-text'}">${num(r.amount) > 0 ? '+' : ''}${money(r.amount)}</td><td>${esc(r.reason)}</td><td>${esc(App.userName(r.created_by))}</td></tr>`).join('')}</tbody></table></div>` : ''}
         <h4 class="sec-title">ملفات العرض المالي</h4>
         ${files.length ? `<div class="att-grid">${files.map((a) => `<div class="att-wrap">${attTile(a)}${App.isFin() ? `<button class="icon-btn att-del" data-action="deleteAttachment" data-id="${a.id}" aria-label="حذف الملف">✕</button>` : ''}</div>`).join('')}</div>` : '<p class="muted">لا توجد ملفات</p>'}
         ${App.isFin() ? `<button class="btn ghost" data-action="uploadBudgetFile" data-project="${p.id}">📎 إرفاق ملف</button>` : ''}`;
@@ -317,7 +385,7 @@ const Pages = (() => {
       if (st === 'action_fin' && !(i.needsReview || i.needsPayment)) return false;
       if (st === 'action_proc' && !(i.needsTI || i.needsFix)) return false;
       if (st && !st.startsWith('action_') && i.status !== st) return false;
-      if (s && ![d.supplier_name, d.doc_number, d.description, d.ti_number].some((x) => String(x || '').toLowerCase().includes(s))) return false;
+      if (s && ![d.supplier_name, d.doc_number, d.description, ...Logic.tisOf(d).map((t) => t.ti_number)].some((x) => String(x || '').toLowerCase().includes(s))) return false;
       return true;
     });
     if (App.isProc() && q.get('mine') === '1') list = list.filter((d) => d.created_by === App.me.id);
@@ -376,37 +444,114 @@ const Pages = (() => {
     return [...map.values()].map((r) => ({ ...r, total: round2(r.total), paid: round2(r.paid), remaining: round2(r.total - r.paid) })).sort((a, b) => b.total - a.total);
   }
 
+  // تحليلات مشتركة بين صفحة التقارير والتصدير
+  function analytics() {
+    const infos = App.db.documents.map((d) => ({ d, i: App.info(d) }));
+    // أعمار المستحقات (المعتمد اللي لسه ما اتسددش من المطلوب)
+    const aging = Logic.AGING.map((b) => ({ ...b, count: 0, amount: 0 }));
+    infos.filter((x) => x.i.dueNow > 0.005).forEach(({ d, i }) => {
+      const b = aging.find((a) => a.key === Logic.agingBucket(d, i));
+      b.count += 1;
+      b.amount = round2(b.amount + i.dueNow);
+    });
+    // ضريبة المدخلات حسب الشهر (حسب تاريخ الفاتورة الضريبية) — تساعد في إقرار ضريبة القيمة المضافة
+    const vatMap = new Map();
+    const addVat = (date, net, vat) => {
+      const m = String(date || '').slice(0, 7) || '—';
+      const r = vatMap.get(m) || { month: m, net: 0, vat: 0, count: 0 };
+      r.net = round2(r.net + num(net)); r.vat = round2(r.vat + num(vat)); r.count += 1;
+      vatMap.set(m, r);
+    };
+    infos.filter(({ d }) => d.review_status === 'approved' && d.doc_type === 'tax_invoice').forEach(({ d }) => addVat(d.doc_date, d.net_amount, d.vat_amount));
+    App.db.tax_invoices.filter((t) => (App.doc(t.document_id) || {}).review_status === 'approved').forEach((t) => addVat(t.ti_date, t.net_amount, t.vat_amount));
+    const vat = [...vatMap.values()].sort((a, b) => b.month.localeCompare(a.month));
+    const vatBlocked = round2(U.sum(infos, (x) => x.i.vatBlocked));
+    // مدة الدورة (بالأيام)
+    const ct = infos.map(({ d }) => Logic.cycleTimes(d, App.db.payments));
+    const avg = (k) => { const v = ct.map((c) => c[k]).filter((x) => x != null); return v.length ? U.sum(v) / v.length : null; };
+    const cycle = { review: avg('reviewDays'), pay: avg('payDays'), ti: avg('tiDays'), total: avg('totalDays') };
+    // الإنفاق حسب البند (كل المشاريع)
+    const cats = new Map();
+    App.db.projects.forEach((p) => Logic.projectCost(p.id, App.db).rows.forEach((r) => {
+      const c = cats.get(r.name) || { name: r.name, budget: 0, committed: 0, paid: 0 };
+      c.budget += r.budget; c.committed += r.committed; c.paid += r.paid;
+      cats.set(r.name, c);
+    }));
+    const byCat = [...cats.values()].map((c) => ({ ...c, budget: round2(c.budget), committed: round2(c.committed), paid: round2(c.paid) })).filter((c) => c.budget || c.committed).sort((a, b) => b.committed - a.committed);
+    return { aging, vat, vatBlocked, cycle, byCat };
+  }
+
   function reports() {
     const rows = App.db.projects.map((p) => ({ p, t: Logic.projectCost(p.id, App.db).totals }));
     const T = {};
-    ['budget', 'committed', 'paid', 'pending', 'variance', 'remainingGross'].forEach((k) => { T[k] = round2(U.sum(rows, (r) => r.t[k])); });
+    ['budget', 'committed', 'invoiced', 'paid', 'pending', 'forecast', 'forecastVariance', 'remainingGross', 'retention'].forEach((k) => { T[k] = round2(U.sum(rows, (r) => r.t[k])); });
     const tState = Logic.usageState(T.budget, T.committed);
-    const sup = supplierSummary();
+    const A = analytics();
+    const agingMax = Math.max(1, ...A.aging.map((a) => a.amount));
+    const catMax = Math.max(1, ...A.byCat.map((c) => Math.max(c.budget, c.committed)));
+    const days = (v) => (v == null ? '—' : `${v.toFixed(1)} يوم`);
+    const top = Pages.supplierIndex ? Pages.supplierIndex().slice(0, 8) : [];
     const html = `
       <div class="print-head">تقرير مراكز التكلفة — كل المشاريع — ${U.today()}</div>
-      <div class="toolbar"><p class="muted">مقارنة التكلفة التقديرية بالفعلية لكل المشاريع — المبالغ قبل الضريبة.</p><span class="spacer"></span>
+      <div class="toolbar"><p class="muted">كل المشاريع — المبالغ قبل الضريبة إلا لو مكتوب غير كده.</p><span class="spacer"></span>
         <button class="btn ghost" data-action="exportReport">⬇ تصدير Excel</button>
         <button class="btn ghost" data-action="print">🖨 طباعة</button></div>
-      <div class="kpis">
-        ${kpi('إجمالي التقديري', sar(T.budget))}
-        ${kpi('إجمالي الملتزم به', sar(T.committed))}
-        ${kpi('إجمالي المسدد', sar(T.paid))}
-        ${kpi('الانحراف الكلي', sar(T.variance), tState ? `${tState.icon} ${tState.label}` : '', tState ? tState.cls : '')}
+      <div class="kpis five">
+        ${kpi('الميزانية المعدلة', sar(T.budget))}
+        ${kpi('الملتزم به', sar(T.committed), `مستهلك ${pct(T.budget ? (T.committed / T.budget) * 100 : null)}`)}
+        ${kpi('المسدد فعلاً', sar(T.paid))}
+        ${kpi('المتوقع عند الإنجاز', sar(T.forecast), `الانحراف ${money(T.forecastVariance)}`, T.forecastVariance < 0 ? 'bad' : '')}
+        ${kpi('المتبقي للموردين', sar(T.remainingGross), `شامل الضريبة · محتجز ${money(T.retention)}`)}
       </div>
+
       <section class="card"><div class="card-head"><h2>المشاريع</h2></div>
       ${rows.length ? `<div class="table-wrap"><table class="tbl hover">
-        <thead><tr><th>المشروع</th><th>الحالة</th><th class="num">التقديري</th><th class="num">الملتزم به</th><th class="num">المسدد</th><th class="num">تحت المراجعة</th><th class="num">الانحراف</th><th class="num">الاستهلاك</th><th>التقييم</th><th class="num">المتبقي للموردين (شامل)</th></tr></thead>
+        <thead><tr><th>المشروع</th><th>الحالة</th><th class="num">الميزانية</th><th class="num">الملتزم به</th><th class="num">المفوتر</th><th class="num">المسدد</th><th class="num">تحت المراجعة</th><th class="num">المتوقع</th><th class="num">الانحراف المتوقع</th><th class="num">الاستهلاك</th><th>التقييم</th></tr></thead>
         <tbody>${rows.map(({ p, t }) => `<tr onclick="location.hash='#/project/${p.id}?tab=cost'">
           <td><b>${esc(p.name)}</b><div class="muted small">${esc(p.code || '')}</div></td><td>${Logic.PROJECT_STATUS[p.status]}</td>
-          <td class="num">${sar(t.budget)}</td><td class="num">${sar(t.committed)}</td><td class="num">${sar(t.paid)}</td><td class="num muted">${sar(t.pending)}</td>
-          <td class="num ${t.variance < 0 ? 'bad-text' : ''}">${sar(t.variance)}</td><td class="num">${pct(t.usage)}</td><td>${statePill(t.state)}</td><td class="num">${sar(t.remainingGross)}</td></tr>`).join('')}</tbody>
-        <tfoot><tr><th colspan="2">الإجمالي</th><th class="num">${sar(T.budget)}</th><th class="num">${sar(T.committed)}</th><th class="num">${sar(T.paid)}</th><th class="num">${sar(T.pending)}</th>
-          <th class="num ${T.variance < 0 ? 'bad-text' : ''}">${sar(T.variance)}</th><th class="num">${pct(T.budget ? (T.committed / T.budget) * 100 : null)}</th><th>${statePill(tState)}</th><th class="num">${sar(T.remainingGross)}</th></tr></tfoot>
+          <td class="num">${sar(t.budget)}</td><td class="num">${sar(t.committed)}</td><td class="num">${sar(t.invoiced)}</td><td class="num">${sar(t.paid)}</td><td class="num muted">${sar(t.pending)}</td>
+          <td class="num">${sar(t.forecast)}</td><td class="num ${t.forecastVariance < 0 ? 'bad-text' : ''}">${sar(t.forecastVariance)}</td><td class="num">${pct(t.usage)}</td><td>${statePill(t.state)}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><th colspan="2">الإجمالي</th><th class="num">${sar(T.budget)}</th><th class="num">${sar(T.committed)}</th><th class="num">${sar(T.invoiced)}</th><th class="num">${sar(T.paid)}</th><th class="num">${sar(T.pending)}</th>
+          <th class="num">${sar(T.forecast)}</th><th class="num ${T.forecastVariance < 0 ? 'bad-text' : ''}">${sar(T.forecastVariance)}</th><th class="num">${pct(T.budget ? (T.committed / T.budget) * 100 : null)}</th><th>${statePill(tState)}</th></tr></tfoot>
       </table></div>` : empty('لا توجد مشاريع')}</section>
-      <section class="card"><div class="card-head"><h2>حسب المورد</h2><span class="muted small">المستندات المعتمدة — شامل الضريبة</span></div>
-      ${sup.length ? `<div class="table-wrap"><table class="tbl">
-        <thead><tr><th>المورد</th><th>الرقم الضريبي</th><th class="num">عدد المستندات</th><th class="num">الإجمالي</th><th class="num">المسدد</th><th class="num">المتبقي</th></tr></thead>
-        <tbody>${sup.map((r) => `<tr><td><b>${esc(r.name)}</b></td><td>${esc(r.vat || '—')}</td><td class="num">${r.count}</td><td class="num">${sar(r.total)}</td><td class="num">${sar(r.paid)}</td><td class="num">${sar(r.remaining)}</td></tr>`).join('')}</tbody>
+
+      <div class="grid2 cards">
+        <section class="card"><div class="card-head"><h2>أعمار المستحقات</h2><span class="muted small">المعتمد غير المسدد — شامل الضريبة</span></div>
+          <div class="hbars">${A.aging.map((a) => `<div class="hbar" tabindex="0" data-tip="${esc(`<b>${a.label}</b><br>${a.count} طلب<br>${money(a.amount)} ر.س`)}">
+            <span class="hb-label">${a.label}</span>
+            <span class="hb-track"><i class="${a.key === 'current' ? 'ok' : a.key === 'nodate' ? 'neutral' : 'late'}" style="width:${((a.amount / agingMax) * 100).toFixed(1)}%"></i></span>
+            <span class="hb-val">${money(a.amount)}<small>${a.count ? ` · ${a.count}` : ''}</small></span></div>`).join('')}</div>
+        </section>
+        <section class="card"><div class="card-head"><h2>كفاءة الدورة</h2><span class="muted small">متوسط عدد الأيام</span></div>
+          <div class="cycle">
+            <div><b>${days(A.cycle.review)}</b><span>من الرفع للاعتماد</span></div>
+            <div><b>${days(A.cycle.pay)}</b><span>من الاعتماد للسداد</span></div>
+            <div><b>${days(A.cycle.total)}</b><span>من الرفع لأول سداد</span></div>
+            <div><b>${days(A.cycle.ti)}</b><span>من السداد لاستلام الفاتورة الضريبية</span></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="grid2 cards">
+        <section class="card"><div class="card-head"><h2>ضريبة المدخلات حسب الشهر</h2><span class="muted small">حسب تاريخ الفاتورة الضريبية</span></div>
+          ${A.vatBlocked > 0 ? `<div class="callout warn">⧗ ضريبة معلّقة ${sar(A.vatBlocked)} — مدفوعات على عروض أسعار لسه ما وصلتش فواتيرها الضريبية، ومش قابلة للاسترداد قبل وصولها.</div>` : ''}
+          ${A.vat.length ? `<div class="table-wrap"><table class="tbl"><thead><tr><th>الشهر</th><th class="num">عدد الفواتير</th><th class="num">قبل الضريبة</th><th class="num">ضريبة قابلة للاسترداد</th></tr></thead>
+            <tbody>${A.vat.map((v) => `<tr><td>${esc(v.month)}</td><td class="num">${v.count}</td><td class="num">${sar(v.net)}</td><td class="num"><b>${sar(v.vat)}</b></td></tr>`).join('')}</tbody>
+            <tfoot><tr><th>الإجمالي</th><th class="num">${U.sum(A.vat, (v) => v.count)}</th><th class="num">${sar(U.sum(A.vat, (v) => v.net))}</th><th class="num">${sar(U.sum(A.vat, (v) => v.vat))}</th></tr></tfoot></table></div>` : empty('لا توجد فواتير ضريبية معتمدة')}
+        </section>
+        <section class="card"><div class="card-head"><h2>الإنفاق حسب البند</h2><span class="muted small">كل المشاريع — الملتزم به مقابل الميزانية</span></div>
+          ${A.byCat.length ? `<div class="hbars">${A.byCat.map((c) => `<div class="hbar" tabindex="0" data-tip="${esc(`<b>${esc(c.name)}</b><br>الميزانية: ${money(c.budget)}<br>الملتزم به: ${money(c.committed)}<br>المسدد: ${money(c.paid)}`)}">
+            <span class="hb-label">${esc(c.name)}</span>
+            <span class="hb-track"><i class="budget" style="width:${((c.budget / catMax) * 100).toFixed(1)}%"></i><i class="committed" style="width:${((c.committed / catMax) * 100).toFixed(1)}%"></i></span>
+            <span class="hb-val">${money(c.committed)}<small> / ${money(c.budget)}</small></span></div>`).join('')}</div>
+            <div class="legend small"><span><i class="lg budget"></i> الميزانية</span><span><i class="lg committed"></i> الملتزم به</span></div>` : empty('لا توجد بيانات')}
+        </section>
+      </div>
+
+      <section class="card"><div class="card-head"><h2>أكبر الموردين</h2><a class="link" href="#/suppliers">كل الموردين وكشوف الحساب</a></div>
+      ${top.length ? `<div class="table-wrap"><table class="tbl hover">
+        <thead><tr><th>المورد</th><th class="num">المعتمد</th><th class="num">المسدد</th><th class="num">الرصيد المستحق</th><th class="num">مشاريع</th></tr></thead>
+        <tbody>${top.map((r) => `<tr onclick="location.hash='#/supplier/${encodeURIComponent(r.name)}'"><td><b>${esc(r.name)}</b></td><td class="num">${sar(r.approved)}</td><td class="num">${sar(r.paid)}</td><td class="num">${sar(r.balance)}</td><td class="num">${r.projects.size}</td></tr>`).join('')}</tbody>
       </table></div>` : empty('لا توجد مستندات معتمدة')}</section>`;
     return { title: 'التقارير ومراكز التكلفة', html };
   }
@@ -664,7 +809,7 @@ const Pages = (() => {
     ...docs.map((d) => {
       const i = App.info(d);
       return [(App.project(d.project_id) || {}).name, Logic.TYPES[d.doc_type], d.supplier_name, d.supplier_vat || '', d.doc_number || '', d.doc_date || '',
-        App.category(d.category_id), d.description || '', i.net, i.vat, i.total, num(d.requested_percent), i.paid, round2(i.paidPct), i.remaining, i.st.label, d.ti_number || ''];
+        App.category(d.category_id), d.description || '', i.net, i.vat, i.total, num(d.requested_percent), i.paid, round2(i.paidPct), i.remaining, i.st.label, i.tis.map((t) => t.ti_number).join(' / ')];
     }),
   ];
   const payRows = (pays) => [
@@ -696,9 +841,11 @@ const Pages = (() => {
     const rows = App.db.projects.map((p) => ({ p, t: Logic.projectCost(p.id, App.db).totals }));
     await writeXlsx(`تقرير مراكز التكلفة - ${fileStamp()}.xlsx`, [
       { name: 'المشاريع', rows: [
-        ['المشروع', 'الكود', 'العميل', 'الحالة', 'التقديري', 'الملتزم به', 'المسدد', 'تحت المراجعة', 'الانحراف', 'الاستهلاك %', 'التقييم', 'المتبقي للموردين (شامل الضريبة)'],
-        ...rows.map(({ p, t }) => [p.name, p.code || '', p.client || '', Logic.PROJECT_STATUS[p.status], t.budget, t.committed, t.paid, t.pending, t.variance, t.usage == null ? '' : round2(t.usage), t.state ? t.state.label : '', t.remainingGross]),
+        ['المشروع', 'الكود', 'العميل', 'الحالة', 'التقديري الأصلي', 'التعديلات', 'الميزانية المعدلة', 'الملتزم به', 'المفوتر', 'المسدد', 'تحت المراجعة', 'المتوقع عند الإنجاز', 'الانحراف المتوقع', 'الاستهلاك %', 'التقييم', 'المتبقي للموردين (شامل الضريبة)', 'محتجز', 'ضريبة معلّقة'],
+        ...rows.map(({ p, t }) => [p.name, p.code || '', p.client || '', Logic.PROJECT_STATUS[p.status], t.original, t.revisions, t.budget, t.committed, t.invoiced, t.paid, t.pending, t.forecast, t.forecastVariance, t.usage == null ? '' : round2(t.usage), t.state ? t.state.label : '', t.remainingGross, t.retention, round2(t.vatBlocked)]),
       ] },
+      { name: 'أعمار المستحقات', rows: [['الفئة', 'عدد الطلبات', 'المبلغ (شامل الضريبة)'], ...analytics().aging.map((a) => [a.label, a.count, a.amount])] },
+      { name: 'ضريبة المدخلات', rows: [['الشهر', 'عدد الفواتير', 'قبل الضريبة', 'الضريبة القابلة للاسترداد'], ...analytics().vat.map((v) => [v.month, v.count, v.net, v.vat]), [], ['ضريبة معلّقة بانتظار فواتير ضريبية', '', '', analytics().vatBlocked]] },
       { name: 'حسب المورد', rows: [['المورد', 'الرقم الضريبي', 'عدد المستندات', 'الإجمالي', 'المسدد', 'المتبقي'], ...supplierSummary().map((r) => [r.name, r.vat || '', r.count, r.total, r.paid, r.remaining])] },
       { name: 'كل المستندات', rows: docRows(App.db.documents) },
       { name: 'كل الدفعات', rows: payRows(App.db.payments) },
@@ -712,5 +859,6 @@ const Pages = (() => {
   return {
     routes: { dashboard, projects, project, requests, payments, reports, notifications, settings },
     login, pending, pill, progress, bindPwUi, attTile, loadThumbs, exportProject, exportReport, exportRequests,
+    docsTable, paymentsTable, kpi, empty, filterSelect, searchBox, writeXlsx, docRows, payRows, typeBadge, statePill, usageBar, analytics,
   };
 })();

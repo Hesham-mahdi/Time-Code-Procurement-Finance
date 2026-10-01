@@ -101,6 +101,18 @@ create table if not exists public.budget_items (
 );
 create index if not exists budget_items_project_idx on public.budget_items(project_id);
 
+-- تعديلات الميزانية (زيادة / تخفيض / تحويل) — العرض التقديري الأصلي بيفضل ثابت للمقارنة الأمينة
+create table if not exists public.budget_revisions (
+  id           uuid primary key default gen_random_uuid(),
+  project_id   uuid not null references public.projects(id) on delete cascade,
+  category_id  uuid references public.cost_categories(id) on delete set null,
+  amount       numeric(14,2) not null check (amount <> 0),
+  reason       text not null,
+  created_by   uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at   timestamptz not null default now()
+);
+create index if not exists budget_revisions_project_idx on public.budget_revisions(project_id);
+
 -- ----------------------------------------------------------------------------- الفواتير وعروض الأسعار
 create table if not exists public.documents (
   id                 uuid primary key default gen_random_uuid(),
@@ -134,6 +146,33 @@ create table if not exists public.documents (
 );
 create index if not exists documents_project_idx on public.documents(project_id);
 
+-- الإصدار 2: آيبان المورد، المحتجزات (ضمان حسن التنفيذ)
+alter table public.documents add column if not exists supplier_iban text;
+alter table public.documents add column if not exists retention_percent numeric(5,2) not null default 0;
+alter table public.documents add column if not exists retention_released_at timestamptz;
+do $$ begin
+  alter table public.documents add constraint documents_retention_chk check (retention_percent >= 0 and retention_percent <= 50);
+exception when duplicate_object then null; end $$;
+create index if not exists documents_supplier_idx on public.documents(lower(supplier_name), doc_number);
+
+-- ----------------------------------------------------------------------------- الفواتير الضريبية المرتبطة بعروض الأسعار
+-- كل دفعة مقدمة نقطة استحقاق ضريبي (ZATCA): المورد يصدر فاتورة ضريبية عن الدفعة، والفاتورة النهائية بتخصم الدفعات السابقة
+create table if not exists public.tax_invoices (
+  id            uuid primary key default gen_random_uuid(),
+  document_id   uuid not null references public.documents(id) on delete cascade,
+  project_id    uuid not null references public.projects(id) on delete cascade,
+  ti_number     text not null,
+  ti_date       date not null,
+  net_amount    numeric(14,2) not null check (net_amount >= 0),
+  vat_amount    numeric(14,2) not null default 0 check (vat_amount >= 0),
+  total_amount  numeric(14,2) not null check (total_amount >= 0),
+  is_final      boolean not null default false,
+  notes         text,
+  created_by    uuid references public.profiles(id) on delete set null default auth.uid(),
+  created_at    timestamptz not null default now()
+);
+create index if not exists tax_invoices_document_idx on public.tax_invoices(document_id);
+
 -- ----------------------------------------------------------------------------- الدفعات
 create table if not exists public.payments (
   id           uuid primary key default gen_random_uuid(),
@@ -165,6 +204,7 @@ create table if not exists public.attachments (
   created_at   timestamptz not null default now()
 );
 create index if not exists attachments_project_idx on public.attachments(project_id);
+alter table public.attachments add column if not exists tax_invoice_id uuid references public.tax_invoices(id) on delete cascade;
 create index if not exists attachments_document_idx on public.attachments(document_id);
 
 -- ----------------------------------------------------------------------------- الإشعارات والسجل
@@ -192,9 +232,48 @@ create table if not exists public.activity_log (
   created_at   timestamptz not null default now()
 );
 
+-- سجل تدقيق غير قابل للتعديل أو الحذف: كل تغيير بقيمته قبل وبعد (بيكتبه trigger مش العميل)
+create table if not exists public.audit_log (
+  id          bigserial primary key,
+  table_name  text not null,
+  record_id   uuid,
+  action      text not null,
+  old_data    jsonb,
+  new_data    jsonb,
+  user_id     uuid default auth.uid(),
+  created_at  timestamptz not null default now()
+);
+create index if not exists audit_log_record_idx on public.audit_log(record_id);
+
+create or replace function public.audit_row() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.audit_log (table_name, record_id, action, old_data, new_data, user_id)
+  values (
+    tg_table_name,
+    case when tg_op = 'DELETE' then old.id else new.id end,
+    tg_op,
+    case when tg_op in ('UPDATE', 'DELETE') then to_jsonb(old) end,
+    case when tg_op in ('INSERT', 'UPDATE') then to_jsonb(new) end,
+    auth.uid()
+  );
+  return null;
+end $$;
+
+do $$
+declare t text;
+begin
+  foreach t in array array['projects','budget_items','budget_revisions','documents','tax_invoices','payments','attachments','profiles'] loop
+    execute format('drop trigger if exists audit_%1$s on public.%1$s', t);
+    execute format('create trigger audit_%1$s after insert or update or delete on public.%1$s for each row execute function public.audit_row()', t);
+  end loop;
+end $$;
+
 -- =============================================================================
 -- الصلاحيات (Row Level Security)
 -- =============================================================================
+alter table public.audit_log        enable row level security;
+alter table public.budget_revisions enable row level security;
 alter table public.profiles        enable row level security;
 alter table public.cost_categories enable row level security;
 alter table public.app_settings    enable row level security;
@@ -246,6 +325,18 @@ drop policy if exists budget_write on public.budget_items;
 create policy budget_write on public.budget_items for all to authenticated
   using (public.my_role() = 'finance') with check (public.my_role() = 'finance');
 
+-- budget_revisions: المالية تضيف فقط — لا تعديل ولا حذف
+drop policy if exists revisions_select on public.budget_revisions;
+create policy revisions_select on public.budget_revisions for select to authenticated using (public.is_active());
+drop policy if exists revisions_insert on public.budget_revisions;
+create policy revisions_insert on public.budget_revisions for insert to authenticated
+  with check (public.my_role() = 'finance');
+
+-- audit_log: قراءة للمالية والإدارة فقط، ومحدش يكتب أو يعدل أو يحذف من العميل
+drop policy if exists audit_select on public.audit_log;
+create policy audit_select on public.audit_log for select to authenticated
+  using (public.my_role() in ('finance','management'));
+
 -- documents
 drop policy if exists documents_select on public.documents;
 create policy documents_select on public.documents for select to authenticated using (public.is_active());
@@ -255,9 +346,25 @@ create policy documents_insert on public.documents for insert to authenticated
 drop policy if exists documents_update on public.documents;
 create policy documents_update on public.documents for update to authenticated
   using (public.my_role() in ('procurement','finance'));
+-- حفظ السجلات (6 سنوات على الأقل): المستند اللي عليه دفعات ممنوع حذفه
 drop policy if exists documents_delete on public.documents;
 create policy documents_delete on public.documents for delete to authenticated
-  using (public.my_role() = 'finance' or (created_by = auth.uid() and review_status = 'new'));
+  using (
+    not exists (select 1 from public.payments p where p.document_id = documents.id)
+    and (public.my_role() = 'finance' or (created_by = auth.uid() and review_status = 'new'))
+  );
+
+-- tax_invoices: المشتريات والمالية يضيفوا، المالية بس تعدل أو تحذف
+alter table public.tax_invoices enable row level security;
+drop policy if exists ti_select on public.tax_invoices;
+create policy ti_select on public.tax_invoices for select to authenticated using (public.is_active());
+drop policy if exists ti_insert on public.tax_invoices;
+create policy ti_insert on public.tax_invoices for insert to authenticated
+  with check (public.my_role() in ('procurement','finance'));
+drop policy if exists ti_update on public.tax_invoices;
+create policy ti_update on public.tax_invoices for update to authenticated using (public.my_role() = 'finance');
+drop policy if exists ti_delete on public.tax_invoices;
+create policy ti_delete on public.tax_invoices for delete to authenticated using (public.my_role() = 'finance');
 
 -- المشتريات ما تقدرش تعتمد مستند بنفسها
 create or replace function public.protect_review() returns trigger
@@ -274,6 +381,32 @@ end $$;
 drop trigger if exists documents_protect_review on public.documents;
 create trigger documents_protect_review before insert or update on public.documents
   for each row execute function public.protect_review();
+
+-- حماية السداد على مستوى قاعدة البيانات: ممنوع السداد قبل الاعتماد أو بأكثر من قيمة المستند
+create or replace function public.check_payment() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  d       public.documents%rowtype;
+  paid    numeric;
+  total   numeric;
+  ti_sum  numeric;
+begin
+  select * into d from public.documents where id = new.document_id for update;
+  if not found then raise exception 'المستند غير موجود'; end if;
+  if d.review_status <> 'approved' then raise exception 'لا يمكن تسجيل دفعة قبل اعتماد المستند'; end if;
+  new.project_id := d.project_id;
+  -- لو وصلت الفاتورة النهائية، القيمة = مجموع الفواتير الضريبية؛ غير كده قيمة المستند
+  select case when bool_or(is_final) then sum(total_amount) end into ti_sum from public.tax_invoices where document_id = d.id;
+  total := coalesce(ti_sum, d.total_amount);
+  select coalesce(sum(amount), 0) into paid from public.payments where document_id = new.document_id and id <> new.id;
+  if paid + new.amount > total + 0.01 then
+    raise exception 'مبلغ الدفعة أكبر من المتبقي على المستند (المتبقي % ر.س)', round(total - paid, 2);
+  end if;
+  return new;
+end $$;
+drop trigger if exists payments_check on public.payments;
+create trigger payments_check before insert or update on public.payments
+  for each row execute function public.check_payment();
 
 -- payments: المالية بس
 drop policy if exists payments_select on public.payments;

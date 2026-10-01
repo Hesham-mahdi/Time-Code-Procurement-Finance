@@ -66,6 +66,7 @@ const App = {
       .filter((n) => n.recipient_id === uid)
       .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
     this.db.cost_categories.sort((a, b) => U.num(a.sort) - U.num(b.sort));
+    Logic.setTaxInvoices(this.db.tax_invoices);
     this.db.projects.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
     this.db.documents.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
     this.db.payments.sort((a, b) => String(b.pay_date).localeCompare(String(a.pay_date)));
@@ -168,11 +169,21 @@ const App = {
       ['projects', 'المشاريع', '▦'],
       ['requests', r === 'procurement' ? 'طلباتي' : 'طلبات السداد', '⇄'],
       ['payments', 'الدفعات والإيصالات', '◈'],
+      ['suppliers', 'الموردين', '◎'],
     ];
     if (r !== 'procurement') items.push(['reports', 'التقارير ومراكز التكلفة', '▤']);
     items.push(['notifications', 'الإشعارات', '🔔']);
+    if (r !== 'procurement') items.push(['activity', 'سجل النشاط', '☰']);
     if (r === 'finance') items.push(['settings', 'الإعدادات', '⚙']);
     return items;
+  },
+
+  // عدد المهام المطلوبة من المستخدم الحالي (للشارة في القائمة)
+  myTaskCount() {
+    const infos = this.db.documents.map((d) => this.info(d));
+    if (this.isFin()) return infos.filter((i) => i.needsReview || i.needsPayment).length;
+    if (this.isProc()) return infos.filter((i) => i.needsTI || i.needsFix).length;
+    return 0;
   },
 
   render() {
@@ -181,7 +192,8 @@ const App = {
     const page = Pages.routes[rt.name] ? rt.name : 'dashboard';
     const unread = this.db.notifications.filter((n) => !n.is_read).length;
     const pendingUsers = this.isFin() ? this.db.profiles.filter((p) => p.role === 'pending').length : 0;
-    const active = page === 'project' ? 'projects' : page;
+    const active = page === 'project' ? 'projects' : page === 'supplier' ? 'suppliers' : page;
+    const tasks = this.myTaskCount();
 
     const out = Pages.routes[page](rt);
     document.title = `${out.title} — Time Code`;
@@ -197,6 +209,7 @@ const App = {
               <a href="#/${k}" class="${active === k ? 'active' : ''}">
                 <span class="nav-ico" aria-hidden="true">${ico}</span><span>${label}</span>
                 ${k === 'notifications' && unread ? `<span class="nav-count">${unread}</span>` : ''}
+                ${k === 'dashboard' && tasks ? `<span class="nav-count blue" title="مهام مطلوبة منك">${tasks}</span>` : ''}
                 ${k === 'settings' && pendingUsers ? `<span class="nav-count">${pendingUsers}</span>` : ''}
               </a>`).join('')}
           </nav>
@@ -217,6 +230,9 @@ const App = {
             <h1 class="page-title">${U.esc(out.title)}</h1>
             ${this.api.mode === 'demo' ? `<span class="demo-badge" data-tip="البيانات محفوظة على هذا المتصفح فقط. افتح تبويب تاني وادخل بمستخدم مختلف علشان تجرب الإشعارات.">وضع تجريبي</span>` : ''}
             <span class="spacer"></span>
+            <label class="top-search"><span class="sr-only">بحث شامل</span>
+              <input type="search" placeholder="بحث: مورد، فاتورة، حوالة، مبلغ…" data-input="globalSearch" value="${rt.name === 'search' ? U.esc(rt.q.get('q') || '') : ''}" aria-label="بحث شامل">
+            </label>
             ${this.canCreate() ? '<button class="btn primary sm top-cta" data-action="newDoc">＋ <span>رفع مستند</span></button>' : ''}
             <button class="icon-btn theme-btn" data-action="toggleTheme" aria-label="تبديل الوضع الليلي" title="الوضع الليلي / النهاري">◐</button>
             <a href="#/notifications" class="bell" aria-label="الإشعارات">🔔${unread ? `<span class="bell-count">${unread}</span>` : ''}</a>
@@ -225,7 +241,11 @@ const App = {
         </div>
       </div>`;
     if (out.after) out.after();
-    window.scrollTo(0, 0);
+    if (this._refocusTop) {
+      this._refocusTop = false;
+      const i = document.querySelector('.top-search input');
+      if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+    } else window.scrollTo(0, 0);
   },
 
   // ---- الأحداث ----
@@ -305,7 +325,38 @@ const Actions = {
     await App.refresh();
   },
 
+  releaseRetention: async (d) => {
+    const doc = App.doc(d.id);
+    const i = App.info(doc);
+    if (!(await U.confirm(`الإفراج عن المحتجز ${U.money(i.retentionHeld)} ر.س لـ ${doc.supplier_name}؟ المبلغ هيبقى مستحق السداد.`, { title: 'الإفراج عن المحتجز', okLabel: 'إفراج', danger: false }))) return;
+    await App.api.update('documents', doc.id, { retention_released_at: new Date().toISOString() });
+    await App.log('الإفراج عن المحتجز', `${U.money(i.retentionHeld)} ر.س`, doc.project_id, doc.id);
+    await App.notify([doc.created_by], { title: 'تم الإفراج عن المحتجز', body: `${App.docTitle(doc)} — ${U.money(i.retentionHeld)} ر.س أصبح مستحق السداد`, project_id: doc.project_id, document_id: doc.id });
+    U.toast('تم الإفراج عن المحتجز');
+    await App.refresh();
+    Forms.docDetails(doc.id);
+  },
+  deleteTI: async (d) => {
+    const t = App.db.tax_invoices.find((x) => x.id === d.id);
+    if (!(await U.confirm(`حذف الفاتورة الضريبية ${t.ti_number}؟`, { okLabel: 'حذف' }))) return;
+    const paths = App.db.attachments.filter((a) => a.tax_invoice_id === t.id).map((a) => a.path);
+    await App.api.remove('tax_invoices', t.id);
+    await Promise.all(paths.map((p) => App.api.removeFile(p).catch(() => {})));
+    await App.log('حذف فاتورة ضريبية', `${t.ti_number} — ${U.money(t.total_amount)} ر.س`, t.project_id, t.document_id);
+    U.toast('تم حذف الفاتورة الضريبية');
+    await App.refresh();
+    Forms.docDetails(t.document_id);
+  },
+  globalSearch: (d, el) => {
+    clearTimeout(Actions._gs);
+    Actions._gs = setTimeout(() => {
+      const q = el.value.trim();
+      if (q.length >= 2) { App._refocusTop = true; App.go(`#/search?q=${encodeURIComponent(q)}`); }
+    }, 350);
+  },
+
   editBudget: (d) => Forms.budget(d.project),
+  reviseBudget: (d) => Forms.budgetRevision(d.project),
   uploadBudgetFile: (d) => Forms.budgetFile(d.project),
   deleteAttachment: async (d) => {
     const a = App.db.attachments.find((x) => x.id === d.id);

@@ -1,8 +1,9 @@
 'use strict';
 
 // طبقة البيانات: نفس الواجهة لـ Supabase وللوضع التجريبي (المحلي)
-const TABLES = ['profiles', 'cost_categories', 'app_settings', 'projects', 'budget_items',
-  'documents', 'payments', 'attachments', 'notifications', 'activity_log'];
+const TABLES = ['profiles', 'cost_categories', 'app_settings', 'projects', 'budget_items', 'budget_revisions',
+  'documents', 'tax_invoices', 'payments', 'attachments', 'notifications', 'activity_log'];
+const AUDITED = ['projects', 'budget_items', 'budget_revisions', 'documents', 'tax_invoices', 'payments', 'attachments', 'profiles'];
 
 function SupabaseBackend(cfg) {
   const sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
@@ -51,6 +52,11 @@ function SupabaseBackend(cfg) {
         if (data.length < page) break;
       }
       return out;
+    },
+    async selectWhere(table, match, { order = 'created_at', asc = false, limit = 500 } = {}) {
+      const { data, error } = await sb.from(table).select('*').match(match).order(order, { ascending: asc }).limit(limit);
+      fail(error);
+      return data;
     },
     async insert(table, rows) {
       const { data, error } = await sb.from(table).insert(rows).select();
@@ -116,7 +122,7 @@ function SupabaseBackend(cfg) {
 // (افتح تبويبين: واحد مشتريات وواحد مالية — الإشعارات بتوصل بينهم)
 // ---------------------------------------------------------------------------
 function LocalBackend() {
-  const KEY = 'tc_demo_db_v1';
+  const KEY = 'tc_demo_db_v2';
   const FKEY = 'tc_demo_files_v1';
   const UKEY = 'tc_demo_user';
   const memFiles = new Map();
@@ -134,12 +140,31 @@ function LocalBackend() {
   if (!db || !db.profiles) { db = demoSeed(); write(KEY, db); }
   TABLES.forEach((t) => { db[t] = db[t] || []; });
   const save = () => write(KEY, db);
-  const reload = () => { const d = read(KEY); if (d && d.profiles) db = d; };
+  const reload = () => {
+    const d = read(KEY);
+    if (d && d.profiles) { db = d; TABLES.forEach((t) => { db[t] = db[t] || []; }); db.audit_log = db.audit_log || []; }
+  };
 
   const deliver = (n) => subs.filter((s) => s.userId === n.recipient_id).forEach((s) => s.cb(n));
   if (bc) bc.onmessage = (e) => { reload(); if (e.data && e.data.type === 'notif') deliver(e.data.row); };
 
   const matches = (row, match) => Object.entries(match).every(([k, v]) => row[k] === v);
+
+  // محاكاة سجل التدقيق والتحقق من الدفعات الموجودين في قاعدة البيانات
+  function audit(table, action, oldRow, newRow) {
+    if (!AUDITED.includes(table)) return;
+    if (!db.audit_log) db.audit_log = [];
+    db.audit_log.push({ id: db.audit_log.length + 1, table_name: table, record_id: (newRow || oldRow).id, action, old_data: oldRow ? clone(oldRow) : null, new_data: newRow ? clone(newRow) : null, user_id: userId(), created_at: new Date().toISOString() });
+  }
+  function checkPayment(p) {
+    const d = db.documents.find((x) => x.id === p.document_id);
+    if (!d) throw new Error('المستند غير موجود');
+    if (d.review_status !== 'approved') throw new Error('لا يمكن تسجيل دفعة قبل اعتماد المستند');
+    const tis = db.tax_invoices.filter((t) => t.document_id === d.id);
+    const total = tis.some((t) => t.is_final) ? tis.reduce((a, t) => a + Number(t.total_amount), 0) : Number(d.total_amount);
+    const paid = db.payments.filter((x) => x.document_id === d.id).reduce((a, x) => a + Number(x.amount), 0);
+    if (paid + Number(p.amount) > total + 0.01) throw new Error(`مبلغ الدفعة أكبر من المتبقي على المستند (المتبقي ${U.money(total - paid)} ر.س)`);
+  }
 
   return {
     mode: 'demo',
@@ -176,11 +201,19 @@ function LocalBackend() {
     },
 
     async select(table) { reload(); return clone(db[table] || []); },
+    async selectWhere(table, match, { order = 'created_at', asc = false, limit = 500 } = {}) {
+      reload();
+      const rows = (db[table] || []).filter((r) => matches(r, match));
+      rows.sort((a, b) => String(a[order]).localeCompare(String(b[order])) * (asc ? 1 : -1));
+      return clone(rows.slice(0, limit));
+    },
     async insert(table, rows) {
       reload();
       const now = new Date().toISOString();
       const out = (Array.isArray(rows) ? rows : [rows]).map((r) => ({ id: U.uuid(), created_at: now, ...r }));
+      if (table === 'payments') out.forEach(checkPayment);
       db[table].push(...out);
+      out.forEach((r) => audit(table, 'INSERT', null, r));
       save();
       if (table === 'notifications') {
         out.forEach((n) => { deliver(n); if (bc) bc.postMessage({ type: 'notif', row: n }); });
@@ -191,7 +224,9 @@ function LocalBackend() {
       reload();
       const row = db[table].find((r) => r.id === id);
       if (!row) throw new Error('السجل غير موجود');
+      const before = clone(row);
       Object.assign(row, patch);
+      audit(table, 'UPDATE', before, row);
       save();
       return clone(row);
     },
@@ -202,11 +237,15 @@ function LocalBackend() {
     },
     async remove(table, id) {
       reload();
+      const gone = db[table].find((r) => r.id === id);
+      if (gone) audit(table, 'DELETE', gone, null);
       db[table] = db[table].filter((r) => r.id !== id);
       // حذف متتالي بسيط لمحاكاة on delete cascade
       if (table === 'projects') ['budget_items', 'documents', 'payments', 'attachments'].forEach((t) => { db[t] = db[t].filter((r) => r.project_id !== id); });
-      if (table === 'documents') ['payments', 'attachments'].forEach((t) => { db[t] = db[t].filter((r) => r.document_id !== id); });
+      if (table === 'documents') ['payments', 'attachments', 'tax_invoices'].forEach((t) => { db[t] = db[t].filter((r) => r.document_id !== id); });
       if (table === 'payments') db.attachments = db.attachments.filter((r) => r.payment_id !== id);
+      if (table === 'tax_invoices') db.attachments = db.attachments.filter((r) => r.tax_invoice_id !== id);
+      if (table === 'projects') ['budget_revisions', 'tax_invoices'].forEach((t) => { db[t] = db[t].filter((r) => r.project_id !== id); });
       save();
     },
     async removeWhere(table, match) {
@@ -344,18 +383,20 @@ function demoSeed() {
   ].map(([project_id, category_id, amount], i) => ({ id: `b-${i}`, project_id, category_id, amount, description: '', created_at: at(40) }));
   const doc = (o) => ({
     supplier_vat: '', doc_date: day(10), description: '', due_date: null, notes: '', review_note: '',
-    reviewed_by: null, reviewed_at: null, ti_number: null, ti_date: null, ti_net: null, ti_vat: null, ti_total: null, ti_uploaded_at: null,
+    reviewed_by: null, reviewed_at: null, supplier_iban: null, retention_percent: 0, retention_released_at: null,
     created_by: pro.id, ...o, vat_amount: U.round2(o.net_amount * 0.15), total_amount: U.round2(o.net_amount * 1.15),
   });
   const docs = [
-    doc({ id: 'd-1', project_id: 'p-1', doc_type: 'tax_invoice', supplier_name: 'مؤسسة الحديد الوطني', supplier_vat: '300123456700003', doc_number: 'INV-5521', category_id: 'c-1', net_amount: 95000, requested_percent: 100, review_status: 'approved', reviewed_by: fin.id, reviewed_at: at(8), created_at: at(12), doc_date: day(12) }),
+    doc({ id: 'd-1', project_id: 'p-1', doc_type: 'tax_invoice', supplier_name: 'مؤسسة الحديد الوطني', supplier_vat: '300123456700003', supplier_iban: 'SA0380000000608010167519', doc_number: 'INV-5521', category_id: 'c-1', net_amount: 95000, requested_percent: 100, review_status: 'approved', reviewed_by: fin.id, reviewed_at: at(8), created_at: at(12), doc_date: day(12) }),
     doc({ id: 'd-2', project_id: 'p-1', doc_type: 'quotation', supplier_name: 'شركة المعدات الثقيلة', doc_number: 'Q-221', category_id: 'c-3', net_amount: 38000, requested_percent: 50, review_status: 'approved', reviewed_by: fin.id, reviewed_at: at(5), created_at: at(7), doc_date: day(7) }),
     doc({ id: 'd-3', project_id: 'p-1', doc_type: 'quotation', supplier_name: 'مصنع الخرسانة الجاهزة', doc_number: 'Q-87', category_id: 'c-1', net_amount: 92000, requested_percent: 30, review_status: 'new', created_at: at(1), doc_date: day(1) }),
-    doc({ id: 'd-4', project_id: 'p-2', doc_type: 'tax_invoice', supplier_name: 'مؤسسة النقل السريع', doc_number: 'INV-90', category_id: 'c-4', net_amount: 8200, requested_percent: 100, review_status: 'approved', reviewed_by: fin.id, reviewed_at: at(3), created_at: at(4), doc_date: day(4) }),
+    doc({ id: 'd-4', project_id: 'p-2', doc_type: 'tax_invoice', supplier_name: 'مؤسسة النقل السريع', supplier_vat: '310987654300003', doc_number: 'INV-90', category_id: 'c-4', net_amount: 8200, requested_percent: 100, due_date: day(3), review_status: 'approved', reviewed_by: fin.id, reviewed_at: at(3), created_at: at(4), doc_date: day(4) }),
+    doc({ id: 'd-5', project_id: 'p-2', doc_type: 'tax_invoice', supplier_name: 'مؤسسة البناء المتقدم للمقاولات', supplier_vat: '302468013500003', doc_number: 'INV-1207', category_id: 'c-5', description: 'مستخلص رقم 1 — أعمال خرسانة', net_amount: 60000, requested_percent: 100, retention_percent: 10, review_status: 'approved', reviewed_by: fin.id, reviewed_at: at(15), created_at: at(16), doc_date: day(16) }),
   ];
   const pays = [
     { id: 'pay-1', document_id: 'd-1', project_id: 'p-1', amount: 109250, pay_date: day(8), method: 'تحويل بنكي', reference: 'TRX-88120', notes: '', created_by: fin.id, created_at: at(8) },
     { id: 'pay-2', document_id: 'd-2', project_id: 'p-1', amount: 21850, pay_date: day(4), method: 'تحويل بنكي', reference: 'TRX-88341', notes: 'دفعة مقدمة 50%', created_by: fin.id, created_at: at(4) },
+    { id: 'pay-3', document_id: 'd-5', project_id: 'p-2', amount: 62100, pay_date: day(12), method: 'تحويل بنكي', reference: 'TRX-87011', notes: 'بعد خصم محتجز 10%', created_by: fin.id, created_at: at(12) },
   ];
   const att = (o) => ({ id: U.uuid(), size: 0, mime: 'image/svg+xml', document_id: null, payment_id: null, created_at: at(5), ...o });
   const attachments = [
@@ -377,6 +418,8 @@ function demoSeed() {
     app_settings: [{ key: 'vat_rate', value: '15' }],
     projects: [p1, p2],
     budget_items: budget,
+    budget_revisions: [{ id: 'r-1', project_id: 'p-1', category_id: 'c-3', amount: 5000, reason: 'إضافة رافعة شوكية لمدة شهر — أمر تغيير 2', created_by: fin.id, created_at: at(6) }],
+    tax_invoices: [],
     documents: docs,
     payments: pays,
     attachments,
