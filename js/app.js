@@ -43,7 +43,11 @@ const App = {
       this.render();
     } catch (e) {
       console.error(e);
-      document.getElementById('app').innerHTML = `<div class="boot err">تعذر تحميل البيانات: ${U.esc(U.errMsg(e))}
+      const schema = /schema cache|does not exist|PGRST205|42703/i.test(String(e && (e.message || e.code)));
+      document.getElementById('app').innerHTML = schema
+        ? `<div class="boot err"><b>قاعدة البيانات محتاجة تحديث</b><br>شغّل ملف schema.sql الأحدث في Supabase (SQL Editor ← New query ← Run) وبعدين حدّث الصفحة.<br><small>${U.esc(U.errMsg(e))}</small>
+          <br><br><button class="btn primary" onclick="location.reload()">إعادة المحاولة</button></div>`
+        : `<div class="boot err">تعذر تحميل البيانات: ${U.esc(U.errMsg(e))}
         <br><br><button class="btn primary" onclick="location.reload()">إعادة المحاولة</button></div>`;
     } finally {
       this.starting = false;
