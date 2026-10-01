@@ -155,6 +155,24 @@ img { max-width: 100%; display: block; }
 .boot { display: grid; place-items: center; min-height: 100vh; color: var(--muted); text-align: center; padding: 24px; }
 .boot.err { color: var(--bad-ink); }
 
+/* ----------------------------------------------------------------------------- أشرطة التمرير */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--muted) 45%, transparent);
+  border-radius: 999px; border: 3px solid transparent; background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--muted) 75%, transparent); }
+::-webkit-scrollbar-thumb:active { background-color: var(--accent); }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+::-webkit-scrollbar-corner { background: transparent; }
+.table-wrap::-webkit-scrollbar, .tabs::-webkit-scrollbar { height: 8px; }
+.tabs::-webkit-scrollbar { display: none; }
+.modal-body::-webkit-scrollbar { width: 10px; }
+@supports (-moz-appearance: none) {
+  * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 50%, transparent) transparent; }
+}
+
 /* ----------------------------------------------------------------------------- أزرار */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
@@ -232,7 +250,11 @@ img { max-width: 100%; display: block; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .logo-navy { filter: brightness(0) invert(1); } }
 .brand-name { font-weight: 700; color: #fff; font-family: 'Segoe UI', system-ui, sans-serif; letter-spacing: .3px; }
 .brand-sub { font-size: 12px; color: #9fb3cc; }
-.nav { position: relative; display: flex; flex-direction: column; gap: 3px; flex: 1; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, .18) transparent; }
+.nav { position: relative; display: flex; flex-direction: column; gap: 3px; flex: 1 0 auto; }
+/* السايدبار نفسه بيعمل scroll لو الشاشة قصيرة — من غير شريط ظاهر */
+.sidebar { overflow-y: auto; overscroll-behavior: contain; }
+.sidebar::-webkit-scrollbar { width: 0; height: 0; display: none; }
+@supports (-moz-appearance: none) { .sidebar { scrollbar-width: none; } }
 .nav a {
   display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px;
   color: #c3d0e0; font-weight: 500; transition: background .15s, color .15s;

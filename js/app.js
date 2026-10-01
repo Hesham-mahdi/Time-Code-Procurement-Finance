@@ -26,7 +26,7 @@ const App = {
     window.addEventListener('hashchange', () => { if (this.me) this.render(); });
 
     const user = await this.api.getUser();
-    if (user) await this.start(user);
+    if (user) { if (!this.user || this.user.id !== user.id) await this.start(user); }
     else if (!this.user) Pages.login();
   },
 

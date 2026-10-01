@@ -194,10 +194,29 @@ const U = (() => {
     return `${uuid()}.${ext}`;
   };
 
+  // ---- تحقق سعودي ----
+  const compact = (s) => String(s || '').replace(/[\s-]+/g, '').toUpperCase();
+  // الرقم الضريبي في السعودية: 15 رقم يبدأ وينتهي بـ 3
+  const isVatNo = (s) => /^3\d{13}3$/.test(compact(s));
+  // الآيبان السعودي: SA + 22 رقم، مع تحقق mod-97
+  const isIban = (s) => {
+    const v = compact(s);
+    if (!/^SA\d{22}$/.test(v)) return false;
+    const r = (v.slice(4) + v.slice(0, 4)).replace(/[A-Z]/g, (c) => String(c.charCodeAt(0) - 55));
+    let m = 0;
+    for (const ch of r) m = (m * 10 + Number(ch)) % 97;
+    return m === 1;
+  };
+  // توحيد أسماء الموردين للمقارنة (همزات، تاء مربوطة، مسافات)
+  const normName = (s) => String(s || '').trim().replace(/\s+/g, ' ').replace(/[إأآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
+    .replace(/^(شركه|مؤسسه|مصنع|مكتب)\s+/, '').toLowerCase();
+  const daysBetween = (a, b) => Math.round((new Date(String(b).slice(0, 10)) - new Date(String(a).slice(0, 10))) / 86400000);
+
   const isImage = (mime, name) => /^image\//.test(mime || '') || /\.(png|jpe?g|gif|webp|bmp|heic)$/i.test(name || '');
 
   return {
     esc, num, round2, money, sar, pct, sum, date, today, dt, ago, uuid, errMsg,
     toast, modal, confirm, closeAll, formObj, initTooltip, fileSafeName, isImage,
+    compact, isVatNo, isIban, normName, daysBetween,
   };
 })();
